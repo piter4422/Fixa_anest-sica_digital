@@ -4,9 +4,7 @@ from datetime import datetime
 import streamlit.components.v1 as components
 import plotly.graph_objects as go
 from fpdf import FPDF 
-import tempfile
-import os
-import time  # <-- Adicionado para corrigir o bug do cronômetro
+import time
 
 # ==========================================
 # CONFIGURAÇÃO DA PÁGINA E MEMÓRIA
@@ -51,7 +49,7 @@ FARMACOS_EMERGENCIA = {
 }
 
 # ==========================================
-# FUNÇÕES DE LÓGICA CLÍNICA E PDF
+# FUNÇÕES DE LÓGICA CLÍNICA E PDF (Sem Gráfico)
 # ==========================================
 def avaliar_parametros_completos(fc, fr, pas, spo2, temp, limites):
     alertas = []
@@ -86,7 +84,7 @@ def avaliar_parametros_completos(fc, fr, pas, spo2, temp, limites):
     if len(alertas) > 0: return f"{msg_base}: {', '.join(alertas)}", cor, icone
     else: return msg_base, cor, icone
 
-def gerar_pdf(df, dados, fig):
+def gerar_pdf(df, dados):
     pdf = FPDF()
     pdf.add_page()
     
@@ -140,24 +138,14 @@ def gerar_pdf(df, dados, fig):
         if len(alerta_txt) > 75: alerta_txt = alerta_txt[:72] + "..."
         pdf.cell(100, 6, alerta_txt, 1, 1, 'L')
     
-    if fig is not None:
-        if pdf.get_y() > 140:
-            pdf.add_page()
-            
-        pdf.ln(10)
-        pdf.set_font("Arial", 'B', 11)
-        pdf.cell(0, 8, " 3. GRAFICO DE TENDENCIA MULTIPARAMETRICA", border='B', ln=True, fill=True)
-        pdf.ln(5)
-        
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmpfile:
-            fig.write_image(tmpfile.name, engine="kaleido", width=800, height=400)
-            y_atual = pdf.get_y()
-            pdf.image(tmpfile.name, x=10, y=y_atual, w=190, h=95)
-            pdf.set_y(y_atual + 105) 
-            
-        os.remove(tmpfile.name)
-    
-    pdf.ln(15)
+    # Adiciona um aviso sobre o gráfico no prontuário físico
+    pdf.ln(10)
+    pdf.set_font("Arial", 'I', 8)
+    pdf.set_text_color(100, 100, 100)
+    pdf.cell(0, 5, "Nota: Grafico de tendencia multiparametrica consultado em tela via Prontuario Digital.", ln=1, align='L')
+    pdf.set_text_color(0, 0, 0)
+
+    pdf.ln(25)
     pdf.set_font("Arial", '', 10)
     pdf.cell(0, 5, "________________________________________________________", ln=1, align='C')
     pdf.cell(0, 5, "Assinatura e Carimbo do Anestesiologista Veterinario", ln=1, align='C')
@@ -366,11 +354,8 @@ with aba_transop:
             
             st.markdown("<br>", unsafe_allow_html=True)
             btn_reg = st.form_submit_button("Salvar Leitura e Reiniciar Relógio", type="primary", use_container_width=True)
-
-        fig = None 
         
         if btn_reg:
-            # O TRUQUE MÁGICO DO TEMPO: O timestamp força o Streamlit a sempre executar essa linha!
             comando_js = f"<script>window.parent.postMessage('reset_timer_via_python', '*'); /* {time.time()} */</script>"
             components.html(comando_js, height=0)
 
@@ -415,7 +400,8 @@ with aba_transop:
                 st.markdown("#### 🖨️ Exportação")
                 nome_arquivo = f"Prontuario_{st.session_state.dados_paciente['nome']}.pdf"
                 
-                pdf_data = gerar_pdf(df, st.session_state.dados_paciente, fig)
+                # Gera o PDF focado apenas nos dados vitais e alertas
+                pdf_data = gerar_pdf(df, st.session_state.dados_paciente)
                 
                 st.download_button(
                     label="📥 Gerar e Baixar PDF Final",
