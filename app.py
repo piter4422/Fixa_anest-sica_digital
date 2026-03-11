@@ -87,6 +87,8 @@ def avaliar_parametros_completos(fc, fr, pas, spo2, temp, limites):
     if len(alertas) > 0: return f"{msg_base}: {', '.join(alertas)}", cor, icone
     else: return msg_base, cor, icone
 
+# O "Cache" é o segredo aqui! Impede a regeneração do arquivo e salva o download.
+@st.cache_data 
 def gerar_pdf(df, dados):
     pdf = FPDF()
     pdf.add_page()
@@ -145,7 +147,7 @@ def gerar_pdf(df, dados):
     # GERAÇÃO DO GRÁFICO ESTÁTICO PARA O PDF
     # ==========================================
     if not df.empty and len(df) > 1:
-        if pdf.get_y() > 130:  # Quebra de página se não houver espaço
+        if pdf.get_y() > 130: 
             pdf.add_page()
             
         pdf.ln(10)
@@ -153,39 +155,36 @@ def gerar_pdf(df, dados):
         pdf.cell(0, 8, " 3. GRAFICO DE TENDENCIA (COMPLETO)", border='B', ln=True, fill=True)
         pdf.ln(5)
 
-        # Desenha o gráfico usando o Matplotlib (funciona em qualquer servidor)
-        plt.figure(figsize=(10, 4.5))
-        plt.plot(df['Hora'], df['FC'], label='FC (bpm)', color='#e74c3c', marker='o', linewidth=2)
-        plt.plot(df['Hora'], df['PAS'], label='PAS (mmHg)', color='#3498db', marker='s', linewidth=2)
-        plt.plot(df['Hora'], df['FR'], label='FR (mpm)', color='#2ecc71', linestyle='--', marker='^')
-        plt.plot(df['Hora'], df['SpO2'], label='SpO2 (%)', color='#9b59b6', linestyle=':', marker='d')
+        # Usando a sintaxe orientada a objetos para não haver fugas de memória no servidor
+        fig, ax = plt.subplots(figsize=(10, 4.5))
+        ax.plot(df['Hora'], df['FC'], label='FC (bpm)', color='#e74c3c', marker='o', linewidth=2)
+        ax.plot(df['Hora'], df['PAS'], label='PAS (mmHg)', color='#3498db', marker='s', linewidth=2)
+        ax.plot(df['Hora'], df['FR'], label='FR (mpm)', color='#2ecc71', linestyle='--', marker='^')
+        ax.plot(df['Hora'], df['SpO2'], label='SpO2 (%)', color='#9b59b6', linestyle=':', marker='d')
         
-        # Desenha a zona verde alvo da Frequência Cardíaca
-        plt.axhspan(LIMITES[dados['especie']]['FC']['min'], LIMITES[dados['especie']]['FC']['max'], 
+        ax.axhspan(LIMITES[dados['especie']]['FC']['min'], LIMITES[dados['especie']]['FC']['max'], 
                     color='green', alpha=0.1, label='Zona Alvo FC')
         
-        plt.title('Evolucao dos Parametros Trans-operatorios', fontsize=12)
-        plt.xlabel('Hora da Afericao')
-        plt.ylabel('Valores Vitais')
-        plt.legend(loc='upper right', fontsize=8, bbox_to_anchor=(1.15, 1))
-        plt.grid(True, linestyle='--', alpha=0.5)
-        plt.tight_layout()
+        ax.set_title('Evolucao dos Parametros Trans-operatorios', fontsize=12)
+        ax.set_xlabel('Hora da Afericao')
+        ax.set_ylabel('Valores Vitais')
+        ax.legend(loc='upper right', fontsize=8, bbox_to_anchor=(1.15, 1))
+        ax.grid(True, linestyle='--', alpha=0.5)
+        fig.tight_layout()
 
-        # Salva o gráfico desenhado numa imagem temporária
         with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmpfile:
-            plt.savefig(tmpfile.name, format='png', dpi=150)
+            fig.savefig(tmpfile.name, format='png', dpi=150)
             y_atual = pdf.get_y()
             pdf.image(tmpfile.name, x=10, y=y_atual, w=190)
-            pdf.set_y(y_atual + 100) # Avança o cursor para não atropelar a imagem
+            pdf.set_y(y_atual + 100) 
             
         os.remove(tmpfile.name)
-        plt.close() # Limpa a memória
+        plt.close(fig)
     else:
         pdf.ln(10)
         pdf.set_font("Arial", 'I', 9)
         pdf.cell(0, 5, "Grafico requer pelo menos duas afericoes para ser gerado.", ln=1)
 
-    # Assinatura (Com margem de segurança)
     pdf.ln(25)
     pdf.set_font("Arial", '', 10)
     pdf.cell(0, 5, "________________________________________________________", ln=1, align='C')
@@ -245,7 +244,7 @@ with aba_paciente:
             ])
 
         st.markdown("<br>", unsafe_allow_html=True)
-        submit_dados = st.form_submit_button("✅ Validar e Iniciar Prontuário Médico", type="primary", use_container_width=True)
+        submit_dados = st.form_submit_button("✅ Validar e Iniciar Prontuário Médico", width="stretch")
 
     if submit_dados:
         if peso <= 0 or nome == "":
@@ -393,7 +392,7 @@ with aba_transop:
             temp = col5.number_input("🌡️ Temp (°C)", min_value=0.0, value=38.0, step=0.1)
             
             st.markdown("<br>", unsafe_allow_html=True)
-            btn_reg = st.form_submit_button("Salvar Leitura e Reiniciar Relógio", type="primary", use_container_width=True)
+            btn_reg = st.form_submit_button("Salvar Leitura e Reiniciar Relógio", width="stretch")
 
         if btn_reg:
             comando_js = f"<script>window.parent.postMessage('reset_timer_via_python', '*'); /* {time.time()} */</script>"
@@ -428,19 +427,19 @@ with aba_transop:
             fig.add_hrect(y0=LIMITES[esp]["FC"]["min"], y1=LIMITES[esp]["FC"]["max"], fillcolor="green", opacity=0.1, line_width=0, annotation_text="Zona Alvo FC")
             fig.update_layout(height=400, margin=dict(l=0, r=0, t=30, b=0), hovermode="x unified", template="plotly_white")
             
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig)
             
             st.markdown("---")
             col_tabela, col_pdf = st.columns([3, 1])
             with col_tabela:
                 st.markdown("#### 📑 Histórico Completo com Ocorrências")
-                st.dataframe(df, use_container_width=True, hide_index=True)
+                st.dataframe(df, hide_index=True)
             
             with col_pdf:
                 st.markdown("#### 🖨️ Exportação")
                 nome_arquivo = f"Prontuario_{st.session_state.dados_paciente['nome']}.pdf"
                 
-                # Gera o PDF com gráfico estático nativo
+                # A função cacheada não irá gerar um arquivo novo e quebrará o download!
                 pdf_data = gerar_pdf(df, st.session_state.dados_paciente)
                 
                 st.download_button(
@@ -448,6 +447,5 @@ with aba_transop:
                     data=pdf_data,
                     file_name=nome_arquivo,
                     mime="application/pdf",
-                    type="primary",
-                    use_container_width=True
+                    width="stretch"
                 )
