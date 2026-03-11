@@ -4,6 +4,9 @@ from datetime import datetime
 import streamlit.components.v1 as components
 import plotly.graph_objects as go
 from fpdf import FPDF 
+import matplotlib.pyplot as plt
+import tempfile
+import os
 import time
 
 # ==========================================
@@ -49,7 +52,7 @@ FARMACOS_EMERGENCIA = {
 }
 
 # ==========================================
-# FUNÇÕES DE LÓGICA CLÍNICA E PDF (Sem Gráfico)
+# FUNÇÕES DE LÓGICA CLÍNICA E PDF
 # ==========================================
 def avaliar_parametros_completos(fc, fr, pas, spo2, temp, limites):
     alertas = []
@@ -138,13 +141,51 @@ def gerar_pdf(df, dados):
         if len(alerta_txt) > 75: alerta_txt = alerta_txt[:72] + "..."
         pdf.cell(100, 6, alerta_txt, 1, 1, 'L')
     
-    # Adiciona um aviso sobre o gráfico no prontuário físico
-    pdf.ln(10)
-    pdf.set_font("Arial", 'I', 8)
-    pdf.set_text_color(100, 100, 100)
-    pdf.cell(0, 5, "Nota: Grafico de tendencia multiparametrica consultado em tela via Prontuario Digital.", ln=1, align='L')
-    pdf.set_text_color(0, 0, 0)
+    # ==========================================
+    # GERAÇÃO DO GRÁFICO ESTÁTICO PARA O PDF
+    # ==========================================
+    if not df.empty and len(df) > 1:
+        if pdf.get_y() > 130:  # Quebra de página se não houver espaço
+            pdf.add_page()
+            
+        pdf.ln(10)
+        pdf.set_font("Arial", 'B', 11)
+        pdf.cell(0, 8, " 3. GRAFICO DE TENDENCIA (COMPLETO)", border='B', ln=True, fill=True)
+        pdf.ln(5)
 
+        # Desenha o gráfico usando o Matplotlib (funciona em qualquer servidor)
+        plt.figure(figsize=(10, 4.5))
+        plt.plot(df['Hora'], df['FC'], label='FC (bpm)', color='#e74c3c', marker='o', linewidth=2)
+        plt.plot(df['Hora'], df['PAS'], label='PAS (mmHg)', color='#3498db', marker='s', linewidth=2)
+        plt.plot(df['Hora'], df['FR'], label='FR (mpm)', color='#2ecc71', linestyle='--', marker='^')
+        plt.plot(df['Hora'], df['SpO2'], label='SpO2 (%)', color='#9b59b6', linestyle=':', marker='d')
+        
+        # Desenha a zona verde alvo da Frequência Cardíaca
+        plt.axhspan(LIMITES[dados['especie']]['FC']['min'], LIMITES[dados['especie']]['FC']['max'], 
+                    color='green', alpha=0.1, label='Zona Alvo FC')
+        
+        plt.title('Evolucao dos Parametros Trans-operatorios', fontsize=12)
+        plt.xlabel('Hora da Afericao')
+        plt.ylabel('Valores Vitais')
+        plt.legend(loc='upper right', fontsize=8, bbox_to_anchor=(1.15, 1))
+        plt.grid(True, linestyle='--', alpha=0.5)
+        plt.tight_layout()
+
+        # Salva o gráfico desenhado numa imagem temporária
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmpfile:
+            plt.savefig(tmpfile.name, format='png', dpi=150)
+            y_atual = pdf.get_y()
+            pdf.image(tmpfile.name, x=10, y=y_atual, w=190)
+            pdf.set_y(y_atual + 100) # Avança o cursor para não atropelar a imagem
+            
+        os.remove(tmpfile.name)
+        plt.close() # Limpa a memória
+    else:
+        pdf.ln(10)
+        pdf.set_font("Arial", 'I', 9)
+        pdf.cell(0, 5, "Grafico requer pelo menos duas afericoes para ser gerado.", ln=1)
+
+    # Assinatura (Com margem de segurança)
     pdf.ln(25)
     pdf.set_font("Arial", '', 10)
     pdf.cell(0, 5, "________________________________________________________", ln=1, align='C')
@@ -229,7 +270,6 @@ with aba_transop:
             st.markdown(f"### Paciente: {st.session_state.dados_paciente['nome']} ({st.session_state.dados_paciente['especie']})")
             st.markdown(f"**Procedimento:** {st.session_state.dados_paciente['procedimento']}")
 
-        # --- CRONÔMETRO AVANÇADO ---
         with col_timer:
             codigo_temporizador = """
             <div id="box-alarme" style="text-align: center; padding: 10px; border-radius: 8px; background-color: #f8f9fa; border: 1px solid #ddd;">
@@ -354,7 +394,7 @@ with aba_transop:
             
             st.markdown("<br>", unsafe_allow_html=True)
             btn_reg = st.form_submit_button("Salvar Leitura e Reiniciar Relógio", type="primary", use_container_width=True)
-        
+
         if btn_reg:
             comando_js = f"<script>window.parent.postMessage('reset_timer_via_python', '*'); /* {time.time()} */</script>"
             components.html(comando_js, height=0)
@@ -400,7 +440,7 @@ with aba_transop:
                 st.markdown("#### 🖨️ Exportação")
                 nome_arquivo = f"Prontuario_{st.session_state.dados_paciente['nome']}.pdf"
                 
-                # Gera o PDF focado apenas nos dados vitais e alertas
+                # Gera o PDF com gráfico estático nativo
                 pdf_data = gerar_pdf(df, st.session_state.dados_paciente)
                 
                 st.download_button(
